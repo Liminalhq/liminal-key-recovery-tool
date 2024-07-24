@@ -2,12 +2,12 @@ import base58
 import math
 from typing import List, Union
 
-from helpers import eddsa_sign
+import eddsa_sign
 
 from solana.rpc.api import Client
-from solana.publickey import PublicKey
-from solana.rpc.types import RPCResponse
-from solana.system_program import TransferParams, transfer
+from solders.pubkey import Pubkey as PublicKey
+from solders.rpc.responses import SendTransactionResp
+from solders.system_program import TransferParams, transfer
 from solana.transaction import Transaction
 from solders.signature import Signature
 
@@ -22,23 +22,50 @@ SOL_DECIMALS = 1e9
 URL = "https://api.mainnet-beta.solana.com"
 
 
-def withdraw(priv, pub, to_address, amount) -> RPCResponse:
-    solana_client = Client(URL)
-    from_address = PublicKey(pub)
-    receiver = PublicKey(address_to_public_key(to_address))
+def build_unsigned_transaction(from_address: str, to_address: str, amount: int) -> bytes:
+    from_address = PublicKey(address_to_public_key(from_address))
+    to_address = PublicKey(address_to_public_key(to_address))
     blockhash = get_blockhash()
-    txn = Transaction().add(transfer(TransferParams(from_pubkey=from_address, to_pubkey=receiver, lamports=amount)))
+
+    txn = Transaction()
+    txn.add(transfer(TransferParams(from_pubkey=from_address, to_pubkey=to_address, lamports=amount)))
     txn.recent_blockhash = blockhash
+    # fee_payer and from_address should be same to build correct signed transaction in build_signed_transaction function
     txn.fee_payer = from_address
-    signature = Signature(eddsa_sign.eddsa_sign(priv, txn.serialize_message()))
-    txn.add_signature(from_address, signature)
-    encoded_serialized_txn = txn.serialize()
-    response = solana_client.send_raw_transaction(encoded_serialized_txn)
-    print(f'Response is: {response}')
+    return txn.serialize(verify_signatures=False)
+
+
+def build_signing_payload(unsigned_txn: bytes) -> bytes:
+    return Transaction.deserialize(unsigned_txn).serialize_message()
+
+
+def sign_transaction_payload(private_key: bytes, payload: bytes) -> bytes:
+    return eddsa_sign.eddsa_sign(private_key, payload)
+
+
+def build_signed_transaction(unsigned_txn: bytes, signature: bytes) -> bytes:
+    txn = Transaction.deserialize(unsigned_txn)
+    txn.add_signature(txn.fee_payer, Signature(signature))
+    return txn.serialize()
+
+
+def broadcast_transaction(signed_txn: bytes) -> SendTransactionResp:
+    solana_client = Client(URL)
+    return solana_client.send_raw_transaction(signed_txn)
+
+
+def withdraw(priv: bytes, pub: bytes, to_address: str, amount: int) -> SendTransactionResp:
+    from_address = public_key_to_address(pub)
+    unsigned_txn: bytes = build_unsigned_transaction(from_address, to_address, amount)
+    signing_payload: bytes = build_signing_payload(unsigned_txn)
+    signature: bytes = sign_transaction_payload(priv, signing_payload)
+    signed_txn: bytes = build_signed_transaction(unsigned_txn, signature)
+    response = broadcast_transaction(signed_txn)
+    print(f'Transaction ID: {response.value}')
     return response
 
 
-def withdraw_token(priv, transfer_params: TransferCheckedParams) -> RPCResponse:
+def withdraw_token(priv, transfer_params: TransferCheckedParams) -> SendTransactionResp:
     solana_client = Client(URL)
     blockhash = get_blockhash()
     txn = Transaction().add(transfer_checked(transfer_params))
@@ -54,9 +81,9 @@ def withdraw_token(priv, transfer_params: TransferCheckedParams) -> RPCResponse:
 
 def get_blockhash():
     solana_client = Client(URL)
-    response = solana_client.get_recent_blockhash()
+    response = solana_client.get_latest_blockhash()
     try:
-        blockhash = response['result']['value']['blockhash']
+        blockhash = response.value.blockhash
     except KeyError as err:
         print(f'falied to retrieve blockhash and fee, with error {err}')
         raise KeyError
@@ -82,3 +109,29 @@ def address_to_public_key(address: bytes) -> bytes:
 
 def sol_to_lamports(amount: float) -> int:
     return int(math.floor(amount * SOL_DECIMALS))
+
+
+public_key=bytes.fromhex("")
+private_key=bytes.fromhex("")
+to_address=""
+amount=0 # lamports
+
+# withdraw(private_key, public_key, to_address, amount)
+
+from_address = public_key_to_address(public_key)
+print("sending from", from_address)
+
+unsigned_txn: bytes = build_unsigned_transaction(from_address, to_address, amount)
+print("unsigned_txn", unsigned_txn.hex())
+
+signing_payload: bytes = build_signing_payload(unsigned_txn)
+print("signing_payload", signing_payload.hex())
+
+signature: bytes = sign_transaction_payload(private_key, signing_payload)
+print("signature", signature.hex())
+
+signed_txn: bytes = build_signed_transaction(unsigned_txn, signature)
+print("signed_txn", signed_txn.hex())
+
+response = broadcast_transaction(signed_txn)
+print(f'txn_hash: {response.value}')
