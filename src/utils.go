@@ -8,13 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/btcsuite/btcutil/base58"
 	"io/ioutil"
+	"log"
 	"math/big"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"syscall"
+
+	"github.com/btcsuite/btcutil/base58"
+	"golang.org/x/term"
 )
 
 type Auth0Response struct {
@@ -26,6 +31,29 @@ type GetPartialRecoveryResponse struct {
 	Success bool   `json:"success"`
 	Data    string `json:"data"`
 }
+
+type RecoveryMethod string
+
+const (
+	LOCAL_PRIVATE_KEY  RecoveryMethod = "1"
+	HSM_TOKEN          RecoveryMethod = "2"
+	MOBILE_PRIVATE_KEY RecoveryMethod = "3"
+)
+
+type RecoveryType string
+
+const (
+	MOBILE RecoveryType = "1"
+	SERVER RecoveryType = "2"
+)
+
+const (
+	ECDSA     string = "ecdsa"
+	SECP256K1 string = "secp256k1"
+
+	EDDSA   string = "eddsa"
+	ED25519 string = "ed25519"
+)
 
 const apiUrl = "https://api.lmnl.app"
 const auth0Url = "https://lmnlhq.us.auth0.com/oauth/token"
@@ -494,4 +522,70 @@ func parseASN1PublicKey(skBytes []byte) ([]byte, error) {
 		return nil, fmt.Errorf("ASN1 struct contains additional data: %v", rest)
 	}
 	return key.Key.Bytes, nil
+}
+
+func TakeInput(text string) string {
+	var input string
+
+	fmt.Println(text)
+	_, err := fmt.Scanln(&input)
+	if err != nil {
+		log.Fatal(err)
+		return ""
+	}
+
+	return input
+}
+
+func TakePasswordInput(text string) string {
+	fmt.Println(text)
+	bytepw, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		log.Fatal(err)
+		return ""
+	}
+
+	return string(bytepw)
+}
+
+func SaveFile(name, content string) error {
+	file, err := os.Create(name)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	file.WriteString(content)
+
+	return nil
+}
+
+func checkError(err error, msg string) {
+	if err != nil {
+		log.Fatalf("%s: %v", msg, err)
+	}
+}
+
+func askForConfirmation(prompt string) bool {
+	fmt.Println(prompt + " (y/n)")
+	var input string
+	_, err := fmt.Scanln(&input)
+	checkError(err, "Error reading input")
+	return strings.ToLower(input) == "y" || strings.ToLower(input) == "yes"
+}
+
+func getBIP32Path() []uint32 {
+	input := TakeInput("Enter BIP 32 Path (It looks like m/XX/YY/A/B/C)")
+
+	var chainpath []uint32
+
+	bip32Path := strings.Split(input, "/")
+	for i, value := range bip32Path {
+		if i == 0 && value == "m" {
+			continue
+		}
+		bipIndex, err := strconv.ParseInt(value, 10, 64)
+		checkError(err, "Invalid path")
+		chainpath = append(chainpath, uint32(bipIndex))
+	}
+	return chainpath
 }
