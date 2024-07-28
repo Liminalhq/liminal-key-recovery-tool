@@ -11,7 +11,8 @@ from solders.system_program import TransferParams, transfer
 from solana.transaction import Transaction
 from solders.signature import Signature
 
-from spl.token.instructions import transfer_checked, TransferCheckedParams
+from spl.token.instructions import transfer_checked, TransferCheckedParams, get_associated_token_address, create_associated_token_account
+from spl.token.constants import TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
 
 BIP_44_CONSTANT = 44
 SOL_ASSET_NUM = 501
@@ -65,18 +66,22 @@ def withdraw(priv: bytes, pub: bytes, to_address: str, amount: int) -> SendTrans
     return response
 
 
-def withdraw_token(priv, transfer_params: TransferCheckedParams) -> SendTransactionResp:
+def build_token_unsigned_transaction(from_address: str, to_address: str, amount: int, token_address: str, decimals: int) -> bytes:
+    token_account = PublicKey(address_to_public_key(token_address))
+    from_account = PublicKey(address_to_public_key(from_address))
+    from_token_account = get_associated_token_address(from_account, token_account)
+    to_account = PublicKey(address_to_public_key(to_address))
+    to_token_account = get_associated_token_address(to_account, token_account)
+
+    txn = Transaction(recent_blockhash=get_blockhash(), fee_payer=from_account)
+
     solana_client = Client(URL)
-    blockhash = get_blockhash()
-    txn = Transaction().add(transfer_checked(transfer_params))
-    txn.recent_blockhash = blockhash
-    txn.fee_payer = transfer_params.owner
-    signature = Signature(eddsa_sign.eddsa_sign(priv, txn.serialize_message()))
-    txn.add_signature(transfer_params.owner, signature)
-    encoded_serialized_txn = txn.serialize()
-    response = solana_client.send_raw_transaction(encoded_serialized_txn)
-    print(f'Response is: {response}')
-    return response
+    to_address_info = solana_client.get_account_info(to_token_account)
+    if to_address_info.value == None:
+        txn.add(create_associated_token_account(from_account, to_account, token_account))
+
+    txn.add(transfer_checked(TransferCheckedParams(TOKEN_PROGRAM_ID, from_token_account, token_account, to_token_account, from_account, amount, decimals)))
+    return txn.serialize(verify_signatures=False)
 
 
 def get_blockhash():
@@ -114,6 +119,8 @@ def sol_to_lamports(amount: float) -> int:
 public_key=bytes.fromhex("")
 private_key=bytes.fromhex("")
 to_address=""
+token_identifier = ""
+decimals = 0
 amount=0 # lamports
 
 # withdraw(private_key, public_key, to_address, amount)
@@ -121,7 +128,7 @@ amount=0 # lamports
 from_address = public_key_to_address(public_key)
 print("sending from", from_address)
 
-unsigned_txn: bytes = build_unsigned_transaction(from_address, to_address, amount)
+unsigned_txn: bytes = build_token_unsigned_transaction(from_address, to_address, amount, token_identifier, decimals)
 print("unsigned_txn", unsigned_txn.hex())
 
 signing_payload: bytes = build_signing_payload(unsigned_txn)
