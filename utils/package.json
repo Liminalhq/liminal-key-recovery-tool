@@ -1,0 +1,19 @@
+{
+  "name": "utils",
+  "version": "1.0.0",
+  "description": "",
+  "main": "btc-derive.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@noble/ed25519": "^3.0.1",
+    "@solana/web3.js": "^1.98.4",
+    "bip32": "^5.0.1",
+    "bitcoinjs-lib": "^7.0.1",
+    "tiny-secp256k1": "^2.2.4"
+  }
+}
